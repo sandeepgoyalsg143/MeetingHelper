@@ -3,7 +3,7 @@ import { envParam, envSecret, publicUrl, rawPostgres } from '@prisma/composer-pr
 import apiService from './service.ts';
 
 export default module('meetinghelper', ({ provision }) => {
-  const database = provision(rawPostgres({ name: 'account-database' }));
+  const database = provision(rawPostgres({ name: 'accountdatabase' }));
   const api = provision(apiService, {
     deps: { db: database },
     input: {
