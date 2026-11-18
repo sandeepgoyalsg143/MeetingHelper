@@ -1,0 +1,35 @@
+name: Deploy to Prisma
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PRISMA_REGION:  us-east-1
+      SAP_AI_CORE_BASE_URL: ${{ vars.SAP_AI_CORE_BASE_URL }}
+      SAP_AI_CORE_TOKEN_URI: ${{ vars.SAP_AI_CORE_TOKEN_URI }}
+      SAP_AI_CORE_DEPLOYMENT_ID: ${{ vars.SAP_AI_CORE_DEPLOYMENT_ID }}
+      SAP_AI_CORE_MODEL: ${{ vars.SAP_AI_CORE_MODEL }}
+      SAP_AI_CORE_RESOURCE_GROUP: ${{ vars.SAP_AI_CORE_RESOURCE_GROUP }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      SAP_AI_CORE_CLIENT_ID: ${{ secrets.SAP_AI_CORE_CLIENT_ID }}
+      SAP_AI_CORE_CLIENT_SECRET: ${{ secrets.SAP_AI_CORE_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+      - uses: prisma/cloud-deploy-action@v1
+        with:
+          module: prisma-compute/module.ts
+          build-command: npm run check:compute && npm run build:compute

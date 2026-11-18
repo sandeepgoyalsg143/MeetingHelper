@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 let failed = false;
-for (const directory of ['server', 'desktop', 'scripts', 'test']) {
+for (const directory of ['config', 'server', 'desktop', 'scripts', 'test']) {
   for (const file of readdirSync(directory)) {
     if (!/\.(js|cjs)$/.test(file)) continue;
     const result = spawnSync(process.execPath, ['--check', join(directory, file)], { stdio: 'inherit' });

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { AppError, providerError } from './errors.js';
+import { safeAdminTokenMatches } from './accounts.js';
 
 const MAX_BODY = 9 * 1024 * 1024;
 const MAX_AUDIO = 6 * 1024 * 1024;
@@ -10,6 +11,12 @@ const IMAGE_TYPES = new Set(['image/jpeg', 'image/png']);
 
 function invalid(message) {
   throw new AppError(400, 'INVALID_REQUEST', message);
+}
+
+function decodeAdminEmail(value) {
+  if (value.includes('@')) return value;
+  try { return decodeURIComponent(value.replace(/%(?![0-9a-f]{2})/gi, '%25')); }
+  catch { throw new AppError(400, 'INVALID_REQUEST', 'Invalid account identifier.'); }
 }
 
 function validateResume(body) {
@@ -96,9 +103,11 @@ async function readJson(request) {
   return body;
 }
 
-export function createApiServer({ service, token, logger = console }) {
-  if (!token || token.length < 32) throw new Error('A server token of at least 32 characters is required.');
+export function createApiServer({ service, token, accounts, adminToken, logger = console }) {
+  if (!accounts && (!token || token.length < 32)) throw new Error('A server token of at least 32 characters is required.');
+  if (accounts && (!adminToken || adminToken.length < 32)) throw new Error('An admin token of at least 32 characters is required.');
   const expected = Buffer.from(`Bearer ${token}`);
+  const loginAttempts = new Map();
   let busy = false;
   return http.createServer({ requestTimeout: 20000, headersTimeout: 10000 }, async (request, response) => {
     response.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -106,8 +115,89 @@ export function createApiServer({ service, token, logger = console }) {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     try {
       const received = Buffer.from(request.headers.authorization ?? '');
-      if (received.length !== expected.length || !timingSafeEqual(received, expected) || request.headers.origin) {
+      const bearer = /^Bearer ([A-Za-z0-9_-]{40,50})$/.exec(request.headers.authorization ?? '');
+      const adminMatch = accounts && /^\/api\/admin\/users(?:\/([^/]+))?$/.exec(request.url ?? '');
+      if (accounts && request.method === 'GET' && request.url === '/api/status') {
+        response.end(JSON.stringify({ provider: 'sap-ai-core', authenticationRequired: true }));
+        return;
+      }
+      if (accounts && request.method === 'POST' && request.url === '/api/auth/login') {
+        if (request.headers.origin) throw new AppError(401, 'UNAUTHORIZED', 'Login request not allowed.');
+        const body = await readJson(request);
+        const email = typeof body.email === 'string' ? body.email.trim().toLowerCase().slice(0, 254) : '';
+        const key = `${request.socket.remoteAddress ?? 'unknown'}:${email}`;
+        if (loginAttempts.size > 1000) {
+          for (const [attemptKey, value] of loginAttempts) {
+            if (value.resetAt <= Date.now()) loginAttempts.delete(attemptKey);
+          }
+        }
+        const attempt = loginAttempts.get(key) ?? { count: 0, resetAt: Date.now() + 15 * 60 * 1000 };
+        if (attempt.resetAt <= Date.now()) {
+          attempt.count = 0;
+          attempt.resetAt = Date.now() + 15 * 60 * 1000;
+        }
+        if (attempt.count >= 8) throw new AppError(429, 'LOGIN_RATE_LIMITED', 'Too many sign-in attempts. Try again in 15 minutes.', true);
+        const session = await accounts.login(body.email, body.password);
+        if (!session) {
+          attempt.count++;
+          loginAttempts.set(key, attempt);
+          throw new AppError(401, 'LOGIN_FAILED', 'Email or password is incorrect, or account access is inactive.');
+        }
+        loginAttempts.delete(key);
+        response.end(JSON.stringify(session));
+        return;
+      }
+      if (adminMatch) {
+        if (!safeAdminTokenMatches(request.headers['x-admin-token'], adminToken) || request.headers.origin) {
+          throw new AppError(401, 'ADMIN_UNAUTHORIZED', 'Admin authorization required.');
+        }
+        if (request.method === 'GET' && !adminMatch[1]) {
+          response.end(JSON.stringify({ users: await accounts.listUsers() }));
+          return;
+        }
+        if (request.method === 'POST' && !adminMatch[1]) {
+          const body = await readJson(request);
+          const user = await accounts.createUser(body);
+          response.statusCode = 201;
+          response.end(JSON.stringify({ user }));
+          return;
+        }
+        if (request.method === 'PUT' && adminMatch[1]) {
+          const email = decodeAdminEmail(adminMatch[1]);
+          const body = await readJson(request);
+          if (!await accounts.setPassword(email, body.password)) {
+            throw new AppError(404, 'USER_NOT_FOUND', 'Account not found.');
+          }
+          response.end(JSON.stringify({ passwordUpdated: true }));
+          return;
+        }
+        if (request.method === 'PATCH' && adminMatch[1]) {
+          const email = decodeAdminEmail(adminMatch[1]);
+          const body = await readJson(request);
+          const user = await accounts.updateUser(email, body);
+          if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'Account not found.');
+          response.end(JSON.stringify({ user }));
+          return;
+        }
+        throw new AppError(404, 'NOT_FOUND', 'Admin route not found.');
+      }
+      let authenticatedSession;
+      if (accounts) {
+        if (request.headers.origin) throw new AppError(401, 'UNAUTHORIZED', 'Only the desktop application may access this server.');
+        authenticatedSession = bearer ? await accounts.authenticate(bearer[1]) : null;
+        if (!authenticatedSession) throw new AppError(401, 'UNAUTHORIZED', 'Sign in is required or account access has been disabled.');
+        if (request.method === 'POST' && request.url === '/api/auth/logout') {
+          await accounts.logout(bearer[1]);
+          response.end(JSON.stringify({ ok: true }));
+          return;
+        }
+      }
+      if (!accounts && (received.length !== expected.length || !timingSafeEqual(received, expected) || request.headers.origin)) {
         throw new AppError(401, 'UNAUTHORIZED', 'Only the authenticated desktop app may access this server.');
+      }
+      if (!accounts && request.method === 'GET' && request.url === '/api/status') {
+        response.end(JSON.stringify(service.status()));
+        return;
       }
       if (request.method === 'GET' && request.url === '/api/status') {
         response.end(JSON.stringify(service.status()));

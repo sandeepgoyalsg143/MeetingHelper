@@ -52,6 +52,76 @@ test('successful status, model verification, text, and transcription requests', 
   assert.equal(calls.length, 2);
 });
 
+test('hosted accounts can sign in and revocation blocks existing sessions immediately', async t => {
+  const sessionToken = 'a'.repeat(43);
+  const adminToken = 'admin-token-that-is-at-least-thirty-two-characters';
+  let active = true;
+  const accounts = {
+    login: async (email, password) => email === 'member@example.com' && password === 'a-strong-password'
+      ? { token: sessionToken, email, expiresAt: '2027-01-01T00:00:00.000Z' } : null,
+    authenticate: async token => active && token === sessionToken ? { id: 1, email: 'member@example.com' } : null,
+    logout: async token => { assert.equal(token, sessionToken); },
+    listUsers: async () => [{ email: 'member@example.com', active }],
+    createUser: async body => ({ email: body.email, active: true }),
+    updateUser: async (email, body) => { active = body.active; return { email, active }; }
+  };
+  const service = {
+    status: () => ({ provider: 'sap-ai-core', model: 'gemini-3.5-flash', configured: true, verified: true }),
+    verify: async () => ({ textGeneration: true, audioTranscription: true }),
+    chat: async () => 'Allowed reply',
+    transcribe: async () => 'Transcript',
+    live: async () => ({ transcript: '', answer: '' })
+  };
+  const server = createApiServer({ service, accounts, adminToken, logger: { error() {} } });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const call = async (route, { method = 'GET', body, token, admin } = {}) => {
+    const response = await fetch(url + route, {
+      method,
+      headers: {
+        ...(token ? { authorization: 'Bearer ' + token } : {}),
+        ...(admin ? { 'x-admin-token': admin } : {}),
+        ...(body === undefined ? {} : { 'content-type': 'application/json' })
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    });
+    return { status: response.status, body: await response.json() };
+  };
+
+  assert.deepEqual((await call('/api/status')).body, {
+    provider: 'sap-ai-core', authenticationRequired: true
+  });
+  assert.equal((await call('/api/chat', {
+    method: 'POST', body: { history: [{ role: 'user', text: 'hello' }] }
+  })).status, 401);
+  const login = await call('/api/auth/login', {
+    method: 'POST', body: { email: 'member@example.com', password: 'a-strong-password' }
+  });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.token, sessionToken);
+  assert.equal((await call('/api/chat', {
+    method: 'POST', token: sessionToken, body: { history: [{ role: 'user', text: 'hello' }] }
+  })).body.answer, 'Allowed reply');
+  assert.equal((await call('/api/admin/users')).status, 401);
+  assert.equal((await call('/api/admin/users', {
+    method: 'POST', admin: adminToken, body: { email: 'new@example.com' }
+  })).status, 201);
+  assert.equal((await call('/api/admin/users/member@example.com', {
+    method: 'PATCH', admin: adminToken, body: { active: false }
+  })).body.user.email, 'member@example.com');
+  assert.equal((await call('/api/admin/users/member+tag@example.com', {
+    method: 'PATCH', admin: adminToken, body: { active: true }
+  })).body.user.email, 'member+tag@example.com');
+  assert.equal((await call('/api/admin/users/member%40example.com', {
+    method: 'PATCH', admin: adminToken, body: { active: false }
+  })).body.user.email, 'member@example.com');
+  assert.equal((await call('/api/chat', {
+    method: 'POST', token: sessionToken, body: { history: [{ role: 'user', text: 'hello' }] }
+  })).status, 401);
+});
+
 test('live API accepts audio and completed context pairs but rejects invalid context locally', async t => {
   const { request, calls } = await setup(t);
   const audio = { data: verificationAudio(), mimeType: 'audio/wav' };

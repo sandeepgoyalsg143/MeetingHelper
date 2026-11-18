@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('meetingHelper', {
+  authMode: () => ipcRenderer.invoke('auth-mode'),
+  authLogin: credentials => ipcRenderer.invoke('auth-login', credentials),
+  authLogout: () => ipcRenderer.invoke('auth-logout'),
   readResume: file => ipcRenderer.invoke('resume-read', file),
   screenSources: () => ipcRenderer.invoke('screen-sources'),
   captureScreen: id => ipcRenderer.invoke('screen-capture', id),

@@ -8,8 +8,9 @@ it does not join calls, post messages, or speak on your behalf.
 
 - Windows 10 version 2004 or later, or Windows 11.
 - Node.js 22.12 or later and npm.
-- SAP AI Core client credentials with access to a running `gemini-3.5-flash`
-  deployment, internet/VPN access, and sufficient quota.
+- The service operator needs SAP AI Core credentials with access to a running
+  `gemini-3.5-flash` deployment, internet/VPN access, and sufficient quota.
+- Hosted account control requires a PostgreSQL database and HTTPS endpoint.
 - Permission from the people/organization whose meeting audio you process.
   Follow your organization's rules for external AI services.
 
@@ -20,20 +21,108 @@ npm ci
 npm start
 ```
 
-The app loads SAP AI Core settings from `.env` when starting the desktop app,
-standalone server, or SAP verification command. Environment variables already
-set in the launching process take precedence. For development, put `.env` in
-the project directory. For a portable executable, put `.env` beside the `.exe`.
-Copy `.env.example` and fill in `SAP_AI_CORE_BASE_URL`, `SAP_AI_CORE_CLIENT_ID`,
-`SAP_AI_CORE_CLIENT_SECRET` and `SAP_AI_CORE_TOKEN_URI`.
-No Gemini API key is needed; `GEMINI_API_KEY` and `GEMINI_MODEL` are not used.
+For private development, the desktop app can use SAP credentials from a local
+`.env`. For a managed release, run the API in `HOSTED_MODE=1` with PostgreSQL
+and SAP credentials configured **only on that server**. Distribute the desktop
+app with a separate `.env` containing only `MEETING_HELPER_API_URL=https://...`;
+never distribute SAP credentials or `ADMIN_TOKEN`. Environment variables set
+by the host take precedence over `.env`. No Gemini API key is used.
 
-Keep credentials in the separate `.env` file or server environment, not in the
-executable, source files, or chat window. Anyone with the executable can extract
-credentials embedded in it. `.env` is not included in portable builds; copy it
-separately and protect it as a secret. The portable app reads it from the
-executable's folder. To rebuild the portable app after changing code, run
-`npm run package:win`; distribute the generated `.exe` and `.env` separately.
+For a self-hosted API, the service creates PostgreSQL tables automatically. Set `HOSTED_MODE=1`,
+`PORT`, `DATABASE_URL`, a random `ADMIN_TOKEN` of at least 32 characters, and
+the SAP AI Core settings on the host. Require HTTPS at the public endpoint.
+Build with `npm ci` and start with `npm run server`. The owner provisions an
+account through `POST /api/admin/users`, and can immediately revoke it with
+`PATCH /api/admin/users/{email}` using `{"active":false}`. Account expiry can be
+set or cleared through the same endpoint using `{"expiresAt":"2027-01-01T00:00:00Z"}`
+or `{"expiresAt":null}`. These admin routes require the private `X-Admin-Token`
+header. User passwords must be at least 12 characters. Reset a user's password
+with `PUT /api/admin/users/{email}/password` and `{"password":"new-long-password"}`;
+this revokes all current sessions for that account. Accounts are provisioned
+manually; this implementation does not charge users or integrate a payment
+processor.
+
+### Deploy the hosted API and database to Prisma
+
+The Prisma deployment uses **Prisma Compute** for the API and **Prisma Postgres**
+for account storage. Use Node.js 22.18+ (or 24.11+) and run `npm ci`,
+`npm run check:compute`, and `npm run build:compute`; `npm ci` installs the Bun
+build tool locally. The build bundles the API for Prisma's Bun runtime. This
+project uses the existing `pg` client; Prisma ORM is not required.
+
+The GitHub Actions workflow at `.github/workflows/prisma-deploy.yml` deploys
+pushes to the default branch to production and other branches to previews using
+OIDC; the repository must remain connected to the existing Prisma project
+`meetinghelper`. Add these GitHub Actions variables: `PRISMA_REGION` (one of the
+supported regions below), `SAP_AI_CORE_BASE_URL`, `SAP_AI_CORE_TOKEN_URI`, and
+optionally `SAP_AI_CORE_DEPLOYMENT_ID`, `SAP_AI_CORE_MODEL`, and
+`SAP_AI_CORE_RESOURCE_GROUP`. Add `ADMIN_TOKEN`, `SAP_AI_CORE_CLIENT_ID`, and
+`SAP_AI_CORE_CLIENT_SECRET` as GitHub Actions secrets. The workflow passes
+these settings to Prisma during deployment; it does not store their values in
+the repository.
+
+Set `SAP_AI_CORE_BASE_URL` and `SAP_AI_CORE_TOKEN_URI` in the PowerShell session
+that runs the deployment. For example:
+
+```powershell
+$env:SAP_AI_CORE_BASE_URL = "https://your-sap-ai-core-host"
+$env:SAP_AI_CORE_TOKEN_URI = "https://your-sap-identity-host/oauth/token"
+```
+
+Set `ADMIN_TOKEN`, `SAP_AI_CORE_CLIENT_ID`, and
+`SAP_AI_CORE_CLIENT_SECRET` as production secrets in Prisma; never commit them
+or put them in the desktop app's `.env`. Optional settings are
+`SAP_AI_CORE_DEPLOYMENT_ID`, `SAP_AI_CORE_MODEL`, and
+`SAP_AI_CORE_RESOURCE_GROUP`. Choose a supported Prisma region for the first
+deployment (`us-east-1`, `us-west-1`, `eu-west-3`, `eu-central-1`,
+`ap-northeast-1`, or `ap-southeast-1`), then run:
+
+```powershell
+npx prisma auth login
+$env:PRISMA_REGION = "your-chosen-region"
+npx prisma deploy
+```
+
+Prisma creates the PostgreSQL database and public HTTPS API URL. The API
+initializes its account tables on startup. Put only that URL in the portable
+desktop's `.env` as `MEETING_HELPER_API_URL=https://...`, then rebuild the
+Windows executable. The API URL and Prisma deployment credentials are not
+included in the executable.
+
+Generate and set `ADMIN_TOKEN` as a private host secret (for example,
+`node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`).
+Use the following PowerShell from the operator's computer to create an account
+or disable it; keep the admin token private:
+
+```powershell
+$env:MEETING_HELPER_API_URL = "https://your-service.example"
+$env:MEETING_HELPER_ADMIN_TOKEN = Read-Host "Admin token"
+$email = Read-Host "User email"
+$password = Read-Host "Temporary password"
+$headers = @{ "X-Admin-Token" = $env:MEETING_HELPER_ADMIN_TOKEN }
+Invoke-RestMethod "$env:MEETING_HELPER_API_URL/api/admin/users" -Method Post `
+  -Headers $headers -ContentType "application/json" `
+  -Body (@{ email = $email; password = $password } | ConvertTo-Json)
+# Disable with curl.exe: the email can be passed normally, without URL encoding.
+curl.exe -X PATCH "$env:MEETING_HELPER_API_URL/api/admin/users/$email" `
+  -H "Content-Type: application/json" `
+  -H "X-Admin-Token: $env:MEETING_HELPER_ADMIN_TOKEN" `
+  --data-raw '{"active":false}'
+```
+
+The desktop app stores the session only in memory. The hosted API rechecks
+account status on every request, so disabling or expiring an account denies
+subsequent requests across all its sessions. Each request already in progress
+may finish. `MEETING_HELPER_API_URL` must be HTTPS, except localhost for testing.
+For a portable release, place `.env` beside the `.exe`; no environment variable
+needs to be set manually. The app reads that file using the portable launcher
+path or its working directory. For local SAP mode, put the SAP AI Core settings
+there. For hosted mode, put only `MEETING_HELPER_API_URL` there. Existing
+Windows environment variables take precedence over values in the file.
+`npm run package:win` builds the portable executable.
+
+Keep all service credentials secret and rotate any credentials that have been
+shared or exposed. The `.env.example` file contains blank placeholders only.
 If your corporate network uses Windows-managed certificate authorities and an
 Electron download fails certificate validation, retry with
 `$env:NODE_USE_SYSTEM_CA = "1"`. The desktop app enables the Windows/system

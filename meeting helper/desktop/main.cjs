@@ -1,13 +1,14 @@
 const { app, BrowserWindow, desktopCapturer, ipcMain, session, dialog, globalShortcut, Tray, Menu, clipboard, screen } = require('electron');
 const { createWindowControls } = require('./window-controls.cjs');
 const { createPasteController } = require('./paste.cjs');
-require('../config/load-env.cjs')();
+require('../config/load-env.cjs')({ packaged: app.isPackaged });
 const { fork, execFile, spawn } = require('node:child_process');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const smokeTest = process.argv.includes('--smoke-test') || process.argv.includes('--overlay-smoke-test');
+const remoteApiUrl = smokeTest ? undefined : process.env.MEETING_HELPER_API_URL;
 const rendererUrl = pathToFileURL(path.join(__dirname, 'index.html')).href;
 const controlsUrl = pathToFileURL(path.join(__dirname, 'controls.html')).href;
 const routes = new Set(['/api/status', '/api/verify', '/api/chat', '/api/transcribe', '/api/live']);
@@ -16,11 +17,23 @@ let window;
 let controlsWindow;
 let baseUrl;
 let quitting = false;
+let sessionToken;
 let windowControls;
 let pasteController;
 let captureExcluded = true;
 const windowControlWarnings = [];
 const token = randomBytes(32).toString('hex');
+
+function validateRemoteApiUrl(value) {
+  if (!value) return undefined;
+  const url = new URL(value);
+  const localHost = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  if ((url.protocol !== 'https:' && !(localHost && url.protocol === 'http:')) ||
+      url.username || url.password || url.search || url.hash) {
+    throw new Error('MEETING_HELPER_API_URL must use HTTPS (HTTP is allowed only for localhost) and contain no credentials or query string.');
+  }
+  return url.origin + url.pathname.replace(/\/+$/, '');
+}
 
 function trusted(event) {
   return window && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame &&
@@ -80,15 +93,18 @@ async function startServer() {
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
     NODE_USE_SYSTEM_CA: process.env.NODE_USE_SYSTEM_CA || '1',
+    ...(smokeTest ? { MEETING_HELPER_SMOKE_TEST: '1' } : {}),
     SERVER_TOKEN: token
   };
   if (smokeTest) {
     for (const name of Object.keys(serverEnvironment)) {
-      if (/^(SAP_AI_CORE_|GEMINI_)/.test(name)) delete serverEnvironment[name];
+      if (/^(SAP_AI_CORE_|GEMINI_|DATABASE_URL$|ADMIN_TOKEN$|HOSTED_MODE$|MEETING_HELPER_API_URL$)/.test(name)) {
+        delete serverEnvironment[name];
+      }
     }
   }
   return new Promise((resolve, reject) => {
-    child = fork(path.join(__dirname, '..', 'server', 'index.js'), [], {
+    child = fork(path.join(__dirname, '..', 'server', 'run-local.js'), [], {
       execPath: process.execPath,
       env: serverEnvironment,
       stdio: ['ignore', 'inherit', 'inherit', 'ipc']
@@ -122,7 +138,8 @@ async function startServer() {
 
 app.whenReady().then(async () => {
   if (process.platform !== 'win32') throw new Error('Meeting Helper currently supports Windows only.');
-  await startServer();
+  if (remoteApiUrl) baseUrl = validateRemoteApiUrl(remoteApiUrl);
+  else await startServer();
   window = new BrowserWindow({
     width: 540, height: 820, minWidth: 420, minHeight: 600,
     show: false, alwaysOnTop: true, backgroundColor: '#0e1420',
@@ -166,6 +183,49 @@ app.whenReady().then(async () => {
       console.error('[meeting-helper] Desktop audio capture could not start.');
       callback({});
     }
+  });
+  ipcMain.handle('auth-mode', event => {
+    if (!trusted(event)) throw new Error('Untrusted window.');
+    return Boolean(remoteApiUrl);
+  });
+  ipcMain.handle('auth-login', async (event, credentials) => {
+    if (!trusted(event) || !remoteApiUrl || !credentials ||
+        typeof credentials.email !== 'string' || typeof credentials.password !== 'string') {
+      throw new Error('Sign-in request is invalid.');
+    }
+    try {
+      const response = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(credentials),
+        signal: AbortSignal.timeout(20000)
+      });
+      const data = await response.json();
+      if (!response.ok) return { ok: false, error: data.error || 'Sign-in failed.' };
+      if (typeof data.token !== 'string' || !/^[A-Za-z0-9_-]{40,50}$/.test(data.token)) {
+        throw new Error('The sign-in service returned an invalid session.');
+      }
+      sessionToken = data.token;
+      return { ok: true, email: data.email, expiresAt: data.expiresAt };
+    } catch (error) {
+      return { ok: false, error: error.name === 'TimeoutError'
+        ? 'Sign-in timed out. Check your internet connection and try again.'
+        : error.message };
+    }
+  });
+  ipcMain.handle('auth-logout', async event => {
+    if (!trusted(event) || !remoteApiUrl) throw new Error('Untrusted window.');
+    const activeToken = sessionToken;
+    sessionToken = undefined;
+    if (!activeToken) return { ok: true, revoked: true };
+    try {
+      const response = await fetch(`${baseUrl}/api/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${activeToken}` },
+        signal: AbortSignal.timeout(10000)
+      });
+      return { ok: true, revoked: response.ok || response.status === 401 };
+    } catch { return { ok: true, revoked: false }; }
   });
   ipcMain.handle('window-info', event => {
     if (!trusted(event)) throw new Error('Untrusted window.');
@@ -221,11 +281,13 @@ app.whenReady().then(async () => {
     try {
       const response = await fetch(`${baseUrl}${route}`, {
         method: route === '/api/status' ? 'GET' : 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: remoteApiUrl ? `Bearer ${sessionToken ?? ''}` : `Bearer ${token}`, 'Content-Type': 'application/json' },
         ...(route === '/api/status' ? {} : { body: JSON.stringify(body ?? {}) }),
         signal: AbortSignal.timeout(route === '/api/verify' ? 240000 : 100000)
       });
-      return { ok: response.ok, status: response.status, data: await response.json() };
+      const data = await response.json();
+      if (remoteApiUrl && response.status === 401) sessionToken = undefined;
+      return { ok: response.ok, status: response.status, data };
     } catch {
       return { ok: false, status: 503, data: {
         error: 'The local AI server is unreachable or timed out. Check connectivity or restart the app.',

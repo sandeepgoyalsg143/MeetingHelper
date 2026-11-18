@@ -35,6 +35,8 @@ let liveTrigger = 'silence';
 let submitLiveTurn = false;
 let screenSource;
 let loadingScreens = false;
+let remoteMode = false;
+let accountDataGeneration = 0;
 
 function navigateToPart(part) {
   if (!Number.isInteger(part) || part < 1 || part > 3) return;
@@ -48,6 +50,47 @@ function navigateToPart(part) {
     panel.hidden = !selected;
   }
   document.querySelector('main').scrollTop = 0;
+}
+
+function clearAccountData() {
+  accountDataGeneration++;
+  conversation.clear();
+  liveHistory = [];
+  queue = [];
+  pendingUserNode = undefined;
+  resumeText = '';
+  screenSource = undefined;
+  $('messages').querySelectorAll('.message').forEach(node => node.remove());
+  $('empty').hidden = false;
+  $('composer').value = '';
+  $('transcript').value = '';
+  $('resume').value = '';
+  $('resume-status').textContent = 'No resume. Replies use generic meeting context.';
+  $('live-transcript').textContent = '';
+  $('live-answer').textContent = '';
+  $('live-panel').hidden = true;
+  $('transcript-panel').hidden = true;
+  $('include-screen').checked = false;
+  updateScreenStatus();
+}
+
+function showLogin(message = '') {
+  verified = false;
+  clearAccountData();
+  $('login-panel').hidden = false;
+  document.querySelector('.step-nav').hidden = true;
+  document.querySelector('main').hidden = true;
+  $('sign-out').hidden = true;
+  $('login-status').textContent = message;
+}
+
+function showApplication(email) {
+  $('login-panel').hidden = true;
+  document.querySelector('.step-nav').hidden = false;
+  document.querySelector('main').hidden = false;
+  $('sign-out').hidden = !remoteMode;
+  $('sign-out').disabled = busy || capturing || acquiring || stopping || audioWorking;
+  if (email) $('login-status').textContent = `Signed in as ${email}.`;
 }
 
 for (let part = 1; part <= 3; part++) {
@@ -200,6 +243,10 @@ async function request(route, body) {
   try { response = await window.meetingHelper.request(route, body); }
   catch { throw Object.assign(new Error('Cannot contact the desktop server. Restart the app.'), { retryable: true }); }
   if (!response.ok) {
+    if (remoteMode && response.status === 401) {
+      if (capturing) stopCapture();
+      showLogin('Your session ended or account access was disabled. Sign in again if access is still active.');
+    }
     if (['MODEL_UNAVAILABLE', 'MODEL_NOT_VERIFIED', 'AUTH_FAILED', 'SAP_AUTH_FAILED',
       'DEPLOYMENT_MODEL_MISMATCH', 'DEPLOYMENT_NOT_RUNNING'].includes(response.data.code)) {
       verified = false;
@@ -241,6 +288,7 @@ function message(role, text) {
 
 async function send() {
   if (!verified || busy || capturing || acquiring || stopping || audioWorking) return;
+  const generation = accountDataGeneration;
   const text = $('composer').value.trim();
   let history;
   try { history = conversation.begin(text); }
@@ -257,6 +305,7 @@ async function send() {
     if (screenSource && $('include-screen').checked) {
       $('activity').textContent = 'Capturing your screen...';
       const shot = await window.meetingHelper.captureScreen(screenSource.id);
+      if (generation !== accountDataGeneration) return;
       if (!shot.ok) throw new Error(shot.error);
       screen = { data: shot.data, mimeType: shot.mimeType };
       const tag = document.createElement('span');
@@ -267,12 +316,14 @@ async function send() {
     }
     const data = await request('/api/chat', { history, ...(resumeText ? { resume: resumeText } : {}),
       ...(screen ? { screen } : {}) });
+    if (generation !== accountDataGeneration) return;
     conversation.complete(data.answer);
     pendingUserNode.classList.remove('pending');
     pendingUserNode = undefined;
     message('model', data.answer);
     $('composer').value = '';
   } catch (error) {
+    if (generation !== accountDataGeneration) return;
     conversation.fail();
     pendingUserNode?.remove();
     pendingUserNode = undefined;
@@ -765,16 +816,62 @@ window.addEventListener('beforeunload', () => {
 });
 
 restoreTypingSpeed();
+async function initializeService() {
+  try {
+    const status = await request('/api/status');
+    privacyInfo = await window.meetingHelper.windowInfo();
+    if ('ghost' in privacyInfo) renderOverlay(privacyInfo);
+    renderCaptureExclusion(privacyInfo);
+    $('model').textContent = status.model;
+    verified = status.verified;
+    $('connection-status').textContent = status.configured
+      ? 'Verify service access before recording.'
+      : 'The AI service is not configured. Contact the administrator.';
+    if (!privacyInfo.alwaysOnTop) showError(new Error('The window is not always on top. Restart the app.'));
+  } catch (error) { showError(error); }
+  refresh();
+}
+
+$('login-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!remoteMode) return;
+  if (busy || capturing || acquiring || stopping || audioWorking) {
+    $('login-status').textContent = 'Wait for the current operation to finish, then sign in again.';
+    return;
+  }
+  $('login-submit').disabled = true;
+  $('login-status').textContent = 'Signing in...';
+  try {
+    const result = await window.meetingHelper.authLogin({
+      email: $('login-email').value.trim(),
+      password: $('login-password').value
+    });
+    if (!result.ok) {
+      $('login-status').textContent = result.error;
+      return;
+    }
+    $('login-password').value = '';
+    showApplication(result.email);
+    await initializeService();
+  } catch {
+    $('login-status').textContent = 'Could not contact the sign-in service. Check your connection and try again.';
+  } finally { $('login-submit').disabled = false; }
+});
+
+$('sign-out').addEventListener('click', async () => {
+  if (capturing) stopCapture();
+  const result = await window.meetingHelper.authLogout();
+  clearError();
+  showLogin(result.revoked ? '' : 'Signed out on this device; the service could not confirm server-side session revocation.');
+  refresh();
+});
+
 try {
-  const status = await request('/api/status');
-  privacyInfo = await window.meetingHelper.windowInfo();
-  if ('ghost' in privacyInfo) renderOverlay(privacyInfo);
-  renderCaptureExclusion(privacyInfo);
-  $('model').textContent = status.model;
-  verified = status.verified;
-  $('connection-status').textContent = status.configured
-    ? 'Verify SAP access first (two small billable requests; no meeting content).'
-    : 'Configure SAP AI Core environment variables on the server, then restart.';
-  if (!privacyInfo.alwaysOnTop) showError(new Error('The window is not always on top. Restart the app.'));
+  remoteMode = await window.meetingHelper.authMode();
+  if (remoteMode) showLogin();
+  else {
+    showApplication();
+    await initializeService();
+  }
 } catch (error) { showError(error); }
 refresh();

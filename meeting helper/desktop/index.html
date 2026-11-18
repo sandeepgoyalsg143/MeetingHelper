@@ -15,9 +15,22 @@
     <div class="header-actions">
       <button id="show-controls" class="quiet" type="button" title="Open the compact shortcut and window controls">Shortcuts</button>
       <button id="new-chat" class="quiet" type="button">New chat</button>
+      <button id="sign-out" class="quiet" type="button" hidden>Sign out</button>
     </div>
   </header>
-  <nav class="step-nav" role="tablist" aria-label="Meeting Helper sections">
+  <section id="login-panel" class="login-panel" aria-label="Account sign in" hidden>
+    <h2>Sign in</h2>
+    <p>Use the account provided to you. Access is checked by the service.</p>
+    <form id="login-form">
+      <label for="login-email">Email</label>
+      <input id="login-email" type="email" autocomplete="username" maxlength="254" required>
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" maxlength="1024" required>
+      <button id="login-submit" type="submit">Sign in</button>
+    </form>
+    <p id="login-status" role="status"></p>
+  </section>
+  <nav class="step-nav" role="tablist" aria-label="Meeting Helper sections" hidden>
     <button id="tab-1" class="step-tab active" type="button" role="tab" aria-selected="true" aria-controls="part-1">
       <span class="step-number">1</span><span>Setup</span><kbd>Ctrl+Alt+1</kbd>
     </button>
@@ -32,7 +45,7 @@
     <span id="error-message"></span>
     <button id="retry" type="button" hidden>Retry</button>
   </div>
-  <main>
+  <main hidden>
     <section id="part-1" class="step-panel" role="tabpanel" aria-labelledby="tab-1">
       <aside class="notice">
         Share a specific other app window in Teams/Zoom, never this window. Capture exclusion is requested,

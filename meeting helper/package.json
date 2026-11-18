@@ -10,7 +10,9 @@
   },
   "scripts": {
     "start": "electron .",
-    "server": "node server/index.js",
+    "server": "node server/run-local.js",
+    "build:compute": "bun build prisma-compute/server-entry.ts --target=bun --outfile=dist/meeting-helper-api.mjs",
+    "check:compute": "tsc --noEmit -p tsconfig.json",
     "test": "node --test",
     "check": "node scripts/check.js",
     "verify:sap": "node scripts/verify-sap.js",
@@ -20,11 +22,19 @@
   },
   "dependencies": {
     "mammoth": "^1.11.0",
-    "pdf-parse": "^2.4.5"
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
+    "@prisma/composer": "^0.39.0",
+    "@prisma/composer-prisma-cloud": "^0.39.0",
+    "@types/bun": "^1.4.4",
+    "arktype": "^2.2.10",
+    "bun": "^1.4.4",
     "electron": "^42.0.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "prisma": "8.0.0-rc.34",
+    "typescript": "^5.9.3"
   },
   "build": {
     "appId": "local.meetinghelper.desktop",

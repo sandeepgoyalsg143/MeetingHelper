@@ -345,7 +345,8 @@ exports.run = async ({ window, controlsWindow, ipcMain, windowControls, windowCo
       model: response.data.model === 'gemini-3.5-flash',
       isolated: typeof require === 'undefined' && typeof process === 'undefined',
       ui: Boolean(document.querySelector('#composer')) && Boolean(document.querySelector('#verify')) &&
-        Boolean(document.querySelector('#paste-live-answer')) && Boolean(document.querySelector('#type-live-answer')),
+        Boolean(document.querySelector('#paste-live-answer')) && Boolean(document.querySelector('#type-live-answer')) &&
+        Boolean(document.querySelector('#login-form')) && Boolean(document.querySelector('#sign-out')),
       topmost: privacy.alwaysOnTop,
       protectionRequested: privacy.captureExclusionRequested
     };
