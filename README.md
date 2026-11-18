@@ -488,3 +488,28 @@ Manual acceptance checks still required: permissions for your deployment, speech
 accuracy, Windows microphone/output devices, and Teams/Zoom sharing from a second
 participant's device. In particular, automated checks cannot establish that a
 particular meeting capture path will honor exclusion.
+
+
+
+# Create user
+curl.exe -X POST "https://mhp20hciowljpwk40st116uk.ewr.prisma.build/api/admin/users" -H "Content-Type: application/json" -H "X-Admin-Token: <ADMIN_TOKEN>" --data-raw "{\"email\":\"you@example.com\",\"password\":\"a-long-password-12+\"}"
+
+# List users
+curl.exe "https://mhp20hciowljpwk40st116uk.ewr.prisma.build/api/admin/users" -H "X-Admin-Token: <ADMIN_TOKEN>"
+
+# Disable user
+curl.exe -X PATCH "https://mhp20hciowljpwk40st116uk.ewr.prisma.build/api/admin/users/you@example.com" -H "Content-Type: application/json" -H "X-Admin-Token: <ADMIN_TOKEN>" --data-raw "{\"active\":false}"
+
+# Enable user
+curl.exe -X PATCH "https://mhp20hciowljpwk40st116uk.ewr.prisma.build/api/admin/users/you@example.com" -H "Content-Type: application/json" -H "X-Admin-Token: <ADMIN_TOKEN>" --data-raw "{\"active\":true}"
+
+# Set expiry date
+curl.exe -X PATCH "https://mhp20hciowljpwk40st116uk.ewr.prisma.build/api/admin/users/you@example.com" -H "Content-Type: application/json" -H "X-Admin-Token: <ADMIN_TOKEN>" --data-raw "{\"expiresAt\":\"2027-01-01T00:00:00Z\"}"
+
+# Clear expiry date
+curl.exe -X PATCH "https://mhp20hciowljpwk40st116uk.ewr.prisma.build/api/admin/users/you@example.com" -H "Content-Type: application/json" -H "X-Admin-Token: <ADMIN_TOKEN>" --data-raw "{\"expiresAt\":null}"
+
+# Reset password
+curl.exe -X PUT "https://mhp20hciowljpwk40st116uk.ewr.prisma.build/api/admin/users/you@example.com/password" -H "Content-Type: application/json" -H "X-Admin-Token: <ADMIN_TOKEN>" --data-raw "{\"password\":\"new-long-password-12+\"}"
+
+
