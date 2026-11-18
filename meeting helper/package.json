@@ -1,0 +1,46 @@
+{
+  "name": "meeting-helper",
+  "version": "1.4.5",
+  "private": true,
+  "description": "Windows private meeting assistant with Gemini through SAP AI Core",
+  "type": "module",
+  "main": "desktop/main.cjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "electron .",
+    "server": "node server/index.js",
+    "test": "node --test",
+    "check": "node scripts/check.js",
+    "verify:sap": "node scripts/verify-sap.js",
+    "test:ui": "electron . --smoke-test",
+    "test:overlay": "electron . --overlay-smoke-test",
+    "package:win": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "mammoth": "^1.11.0",
+    "pdf-parse": "^2.4.5"
+  },
+  "devDependencies": {
+    "electron": "^42.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "local.meetinghelper.desktop",
+    "productName": "Meeting Helper",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "config/**/*",
+      "desktop/**/*",
+      "server/**/*",
+      "scripts/desktop-smoke.cjs",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable"
+    }
+  }
+}

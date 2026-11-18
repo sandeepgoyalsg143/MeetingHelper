@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Meeting Helper Controls</title>
+  <link rel="stylesheet" href="controls.css">
+  <script defer src="controls.js"></script>
+</head>
+<body>
+  <header><span class="drag">QUICK CONTROLS</span><button id="hide" class="icon" title="Hide controls" aria-label="Hide controls">×</button></header>
+  <div class="state-row"><span id="mode-state">Main window ready</span><span id="ghost-state">Ghost off</span></div>
+  <section aria-label="Navigate sections">
+    <h2>Go to section</h2>
+    <div class="nav-grid">
+      <button data-action="part-1"><span>Setup</span><kbd>Ctrl+Alt+1</kbd></button>
+      <button data-action="part-2"><span>Overlay</span><kbd>Ctrl+Alt+2</kbd></button>
+      <button data-action="part-3"><span>Responses</span><kbd>Ctrl+Alt+3</kbd></button>
+    </div>
+  </section>
+  <section aria-label="Main window controls">
+    <h2>Main window</h2>
+    <div class="action-grid">
+      <button data-action="show-main">Show / restore</button>
+      <button data-action="minimize-main">Minimize</button>
+      <button data-action="toggle-maximize">Maximize / restore size</button>
+    </div>
+  </section>
+  <section class="ghost-section" aria-label="Ghost mode">
+    <button id="toggle-ghost" data-action="toggle-ghost">Enable ghost mode</button>
+    <p id="shortcut-status">Ctrl+Alt+G toggles ghost mode. Ctrl+Alt+Space restores the main window.</p>
+  </section>
+  <section class="share-section" aria-label="Screen-share visibility">
+    <button id="toggle-capture-exclusion" data-action="toggle-capture-exclusion">Make visible to screen share</button>
+    <p id="capture-status">Capture exclusion is requested, not guaranteed. Ctrl+Alt+V toggles this setting.</p>
+  </section>
+</body>
+</html>

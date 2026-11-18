@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Meeting Helper</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="renderer.js"></script>
+</head>
+<body>
+  <header>
+    <div><h1>Meeting Helper <span class="badge">PRIVATE WINDOW</span></h1>
+      <p>Always on top · capture exclusion requested, not guaranteed</p></div>
+    <div class="header-actions">
+      <button id="show-controls" class="quiet" type="button" title="Open the compact shortcut and window controls">Shortcuts</button>
+      <button id="new-chat" class="quiet" type="button">New chat</button>
+    </div>
+  </header>
+  <nav class="step-nav" role="tablist" aria-label="Meeting Helper sections">
+    <button id="tab-1" class="step-tab active" type="button" role="tab" aria-selected="true" aria-controls="part-1">
+      <span class="step-number">1</span><span>Setup</span><kbd>Ctrl+Alt+1</kbd>
+    </button>
+    <button id="tab-2" class="step-tab" type="button" role="tab" aria-selected="false" aria-controls="part-2" tabindex="-1">
+      <span class="step-number">2</span><span>Overlay</span><kbd>Ctrl+Alt+2</kbd>
+    </button>
+    <button id="tab-3" class="step-tab" type="button" role="tab" aria-selected="false" aria-controls="part-3" tabindex="-1">
+      <span class="step-number">3</span><span>Responses</span><kbd>Ctrl+Alt+3</kbd>
+    </button>
+  </nav>
+  <div id="error" class="error" role="alert" hidden>
+    <span id="error-message"></span>
+    <button id="retry" type="button" hidden>Retry</button>
+  </div>
+  <main>
+    <section id="part-1" class="step-panel" role="tabpanel" aria-labelledby="tab-1">
+      <aside class="notice">
+        Share a specific other app window in Teams/Zoom, never this window. Capture exclusion is requested,
+        <strong>not guaranteed</strong>; verify from a second device.
+      </aside>
+      <section class="connection" aria-label="SAP AI Core connection">
+        <div><strong id="model">gemini-3.5-flash</strong><p>Via SAP AI Core</p><p id="connection-status" role="status">Checking server...</p></div>
+        <button id="verify" type="button">Verify access</button>
+      </section>
+      <section class="audio-panel" aria-label="Start a meeting mode">
+        <h2>Start a mode</h2>
+        <p>Verify access and confirm permission before processing meeting audio.</p>
+        <label for="resume">Optional resume persona (PDF, DOCX or TXT)</label>
+        <input id="resume" type="file" accept=".pdf,.docx,.txt">
+        <button id="clear-resume" class="quiet" type="button">Clear resume</button>
+        <p id="resume-status" role="status">No resume. Replies use generic meeting context.</p>
+        <p class="hint">Resume text is sent with chat/live requests, kept only in memory, and used for first-person replies without inventing experience.</p>
+        <fieldset id="live-trigger" class="trigger-options">
+          <legend>Live answer timing</legend>
+          <label><input type="radio" name="live-trigger" value="silence" checked> After 2 seconds of silence</label>
+          <label><input type="radio" name="live-trigger" value="manual"> Only when I click Send audio</label>
+        </fieldset>
+        <label class="consent"><input id="consent" type="checkbox">
+          I have permission to transcribe. Audio is processed through SAP AI Core by the configured Gemini provider.
+        </label>
+        <div class="actions start-actions">
+          <button id="live" type="button" disabled>Start live suggestions</button>
+          <button id="meeting" class="secondary" type="button" disabled>Start meeting audio</button>
+          <button id="microphone" class="secondary" type="button" disabled>Record voice</button>
+        </div>
+        <p id="audio-status" role="status">Meeting audio captures all computer output, including other apps. Voice records your microphone.</p>
+      </section>
+      <section class="screen-panel" aria-label="Screen context">
+        <div class="screen-head">
+          <strong>Screen context</strong>
+          <div class="actions">
+            <button id="choose-screen" class="secondary" type="button">Choose screen or window</button>
+            <button id="stop-screen" class="quiet" type="button" hidden>Stop screen access</button>
+          </div>
+        </div>
+        <div id="screen-sources" class="screen-sources" hidden></div>
+        <p id="screen-status" role="status">Off. Choose a screen or window to ask questions about what is on it.</p>
+        <label class="consent"><input id="include-screen" type="checkbox" disabled>
+          Include a fresh snapshot with each message I send
+        </label>
+        <p class="hint">A snapshot is taken only when you send, sent through SAP AI Core, and not stored. This app's own window is excluded.</p>
+      </section>
+    </section>
+    <section id="part-2" class="step-panel" role="tabpanel" aria-labelledby="tab-2" hidden>
+      <section class="typing-panel" aria-label="Ghost overlay settings">
+        <div class="panel-heading"><div><h2>Ghost mode</h2><p>Keep the main overlay visible while clicks pass through to the app underneath.</p></div>
+          <button id="ghost-mode" type="button" aria-pressed="false">Enable ghost mode</button></div>
+        <label for="ghost-opacity">Ghost opacity <span class="hint">(lower is more transparent)</span></label>
+        <div class="typing-speed-control">
+          <span>20%</span><input id="ghost-opacity" type="range" min="20" max="90" step="1" value="60">
+          <span>90%</span><output id="ghost-opacity-value" for="ghost-opacity">60%</output>
+        </div>
+        <p id="ghost-status" class="hint" role="status">The compact Shortcuts window remains clickable while the main window is in ghost mode.</p>
+      </section>
+      <section class="typing-panel" aria-label="Reply typing settings">
+        <h2>Typing speed</h2>
+        <p>Applies when you choose Type reply. Paste is unchanged.</p>
+        <div class="typing-speed-control">
+          <span>Slower</span>
+          <input id="typing-speed" type="range" min="10" max="150" step="1" value="40" aria-describedby="typing-speed-help">
+          <span>Faster</span><output id="typing-speed-value" for="typing-speed">40 WPM</output>
+        </div>
+        <p id="typing-speed-help" class="hint">10-150 words per minute (approximate; 5 characters per word). Includes varied pauses and is saved on this computer.</p>
+      </section>
+      <section class="typing-panel" aria-label="Screen-share visibility">
+        <h2>Screen-share visibility</h2>
+        <p id="capture-exclusion-status" role="status">Exclusion requested. This is not guaranteed in every sharing mode.</p>
+        <button id="capture-exclusion-toggle" class="secondary" type="button">Make visible to screen share</button>
+        <p class="hint">This changes the Windows capture-exclusion request for both Meeting Helper windows. Shortcut: <kbd>Ctrl+Alt+V</kbd>.</p>
+      </section>
+      <aside class="shortcut-note">
+        <strong>Quick access</strong>
+        <p>Use <kbd>Ctrl+Alt+1</kbd>, <kbd>Ctrl+Alt+2</kbd>, and <kbd>Ctrl+Alt+3</kbd> to switch sections.
+          <kbd>Ctrl+Alt+G</kbd> toggles ghost mode; <kbd>Ctrl+Alt+V</kbd> toggles screen-share visibility; <kbd>Ctrl+Alt+Space</kbd> restores the main window.</p>
+        <button id="open-controls-from-overlay" class="secondary" type="button">Open compact controls</button>
+      </aside>
+    </section>
+    <section id="part-3" class="step-panel response-panel" role="tabpanel" aria-labelledby="tab-3" hidden>
+      <div class="response-header">
+        <div><h2>Responses</h2><p>Live suggestions, transcript review, and your conversation.</p></div>
+        <div class="actions response-actions">
+          <button id="stop" class="danger" type="button" disabled>Stop</button>
+          <button id="send-audio" type="button" disabled>Send audio</button>
+        </div>
+      </div>
+      <p id="activity" role="status" hidden></p>
+      <section id="live-panel" class="transcript-panel live-panel" hidden aria-label="Automatic live suggestions">
+        <strong>Live suggestions</strong>
+        <p id="live-status" role="status">Listening...</p>
+        <label>Latest heard speech</label>
+        <p id="live-transcript" class="live-text"></p>
+        <label>Latest suggested reply</label>
+        <p id="live-answer" class="live-text" aria-live="polite">Waiting for a question...</p>
+        <div class="actions">
+          <button id="paste-live-answer" class="quiet" type="button" disabled>Paste reply</button>
+          <button id="type-live-answer" class="quiet" type="button" disabled>Type reply</button>
+        </div>
+        <p class="hint">Suggestions are not sent or spoken automatically. Review before using.</p>
+      </section>
+      <section id="transcript-panel" class="transcript-panel" hidden aria-label="Transcript review">
+        <label for="transcript">Review and edit transcript</label>
+        <textarea id="transcript" rows="3" maxlength="24000" placeholder="Transcription appears here. Nothing is sent as a chat message automatically."></textarea>
+        <div class="actions">
+          <button id="approve" type="button">Approve &amp; use in message</button>
+          <button id="discard" class="quiet" type="button">Discard transcript</button>
+        </div>
+        <p>Stop recording to approve. You can edit again before sending.</p>
+      </section>
+      <p id="paste-status" class="status-card" role="status" hidden></p>
+      <button id="cancel-paste" class="quiet" type="button" hidden>Cancel pending paste</button>
+      <section id="messages" class="messages" aria-label="Conversation history" aria-live="polite">
+        <div id="empty" class="empty">
+          <h2>Be present. Find the words.</h2>
+          <p>Start a mode in Setup, then your live response appears here. You can also ask a question below.</p>
+          <div class="suggestions">
+            <button type="button" data-prompt="Help me phrase a concise follow-up question about this meeting.">Find a follow-up</button>
+            <button type="button" data-prompt="Summarize the decisions and open questions in our conversation so far.">Summarize decisions</button>
+            <button type="button" data-prompt="Look at my screen. Explain what it shows and suggest what I should say or ask about it." data-screen>Explain my screen</button>
+          </div>
+        </div>
+      </section>
+      <form id="chat-form">
+        <label for="composer">Message</label>
+        <textarea id="composer" rows="2" maxlength="24000" placeholder="Ask a question or approve a transcript above..." required></textarea>
+        <div class="composer-footer"><span>Ctrl+Enter to send</span><button id="send" type="submit" disabled>Send message</button></div>
+      </form>
+      <footer>AI suggestions may be wrong. Review before speaking. Chat history stays in memory until you close or clear the app.</footer>
+    </section>
+  </main>
+</body>
+</html>
