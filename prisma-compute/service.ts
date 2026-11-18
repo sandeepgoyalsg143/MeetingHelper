@@ -16,7 +16,7 @@ const serviceInput = type({
 });
 
 export default compute({
-  name: 'meeting-helper-api',
+  name: 'meetinghelperapi',
   deps: { db: rawPostgres() },
   input: serviceInput,
   build: node({ module: import.meta.url, entry: '../dist/meeting-helper-api.mjs' }),
